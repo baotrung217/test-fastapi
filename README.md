@@ -1,0 +1,1 @@
+Test fastAPI to handle POST request with images
