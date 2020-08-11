@@ -3,49 +3,53 @@ import os
 import sys
 import time
 
-from sanic import Sanic
-from sanic.response import json, file
+from typing import Optional
+from fastapi import FastAPI, Response, status, File, UploadFile, Form
+import uvicorn
 
 from src.controllers.image_controller import ImageController
 
 # Setup application
-app = Sanic(name='test-fastapi')
+app = FastAPI()
 
 # return JSON
 ret = dict()
 
-@app.route('/', methods=['GET', 'OPTIONS'])
-async def option(request):
-    return json(
-        {'success': True},
-        headers={
-            'Access-Control-Allow-Headers': 'api_key, Content-Type',
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': '*',
-            'Hostname': HOST_NAME,
-            'X-FPTAI-BILLING': 0
-        })
+@app.get('/')
+async def health_check(response: Response):
+    response.headers["Hostname"] = "hostname"
+    response.headers["X-FPTAI-BILLING"] = '0'
+    return {'success': True}
 
-@app.route('/', methods=['POST'])
-async def read_api(request):
+@app.post('/')
+async def read_api(response: Response, 
+                   image: Optional[UploadFile] = File(None),
+                   image_url: Optional[str] = Form(None)):
     print('Started new at: ' + str(datetime.datetime.now()))
-    response_status = 200
+    response.status_code = status.HTTP_200_OK
+    response.headers["X-FPTAI-BILLING"] = '1'
+    result = dict()
 
     img_controller = ImageController()
 
     try:
-        if 'image' in request.files:
-            image = request.files.get('image')
+        print('0')
+        print(image)
+        print(image_url)
+        if image is not None:
             data_type = 'image'
             result = img_controller.image2text(image, data_type)
+            print(result)
+        elif image_url is not None:
+            data_type = 'url'
+            result = img_controller.image2text(image_url, data_type)
             print(result)
         else:
             result['error'] = 'Invalid Parameters or Values!'
 
         if 'error' in result:
-            fptai_billing = 0
-            response_status = 400
+            response.headers["X-FPTAI-BILLING"] = '0'
+            response.status_code = status.HTTP_400_BAD_REQUEST
             if result['error'] == 'Invalid Parameters or Values!':
                 ret['errorCode'] = 1
                 ret['errorMessage'] = result['error']
@@ -58,7 +62,7 @@ async def read_api(request):
                 ret['errorCode'] = 3
                 ret['errorMessage'] = result['error']
                 ret['data'] = []
-                fptai_billing = 1
+                response.headers["X-FPTAI-BILLING"] = '1'
             elif result['error'] == 'Downloading file timed out':
                 ret['errorCode'] = 4
                 ret['errorMessage'] = result['error']
@@ -96,25 +100,11 @@ async def read_api(request):
             ret['errorMessage'] = ''
             ret['data'] = []
                
-        return json(ret, ensure_ascii=False, escape_forward_slashes=False,
-                    headers={
-                        'Access-Control-Allow-Headers': 'api_key, Content-Type',
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Methods': '*'
-                    },
-                    status=response_status)
+        return ret
     except Exception as e:
         print(e)
-        return json("Something wrong has happened",
-                    headers={
-                        'Access-Control-Allow-Headers': 'api_key, Content-Type',
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Methods': '*'
-                    },
-                    status=500)
-
+        response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        return {'error': 'Something wrong has happened'}
 
 if __name__ == '__main__':
-    app.run(port=5000, host='0.0.0.0', workers=1, debug=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=5000, log_level="info", reload=True)

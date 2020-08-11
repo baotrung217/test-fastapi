@@ -6,9 +6,31 @@ import logging
 import traceback
 import imghdr
 import cv2
+import whatimage
+from contextlib import contextmanager
+import signal
+import requests
+
+from pdf2image import convert_from_bytes
 
 WORKING_DIR = os.path.abspath('.')
 UPLOADED_DIR = WORKING_DIR + '/resources/images/original'
+
+class TimeoutException(Exception):
+    pass
+
+
+@contextmanager
+def time_limit(seconds):
+    def signal_handler(signum, frame):
+        raise TimeoutException("Downloading file timed out")
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+
 
 class ImageController:
     def __init__(self):
@@ -26,6 +48,7 @@ class ImageController:
         # Image's name with time-stamp
         try:
             if data_type == "url":
+                print('image: ', image)
                 filename = str(
                     datetime.datetime.now().isoformat()) + '_' + 'url.jpg'
                 try:
@@ -35,20 +58,20 @@ class ImageController:
                     logging.error("Downloading file timed out!")
                     self.result['error'] = 'Downloading file timed out'
                     return self.result
-                except:
-                    logging.error(traceback.format_exc())
+                except Exception as e:
+                    logging.error('Exception: %s', e)
                     self.result['error'] = 'Failed to open the URL!'
                     return self.result
             elif data_type == "image":
                 # Support receive pdf file
-                if image.name.split('.')[-1] == 'pdf':
+                if image.filename.split('.')[-1] == 'pdf':
                     # Convert pdf to image
-                    img_pdf = convert_from_bytes(image.body)[0]
+                    img_pdf = convert_from_bytes(image.file.read())[0]
                     filename = str(datetime.datetime.now().isoformat(
-                    )) + '_' + ''.join(image.name.split('.')[:-1]) + '.jpg'
+                    )) + '_' + ''.join(image.filename.split('.')[:-1]) + '.jpg'
                 else:
                     filename = str(
-                        datetime.datetime.now().isoformat()) + '_' + image.name
+                        datetime.datetime.now().isoformat()) + '_' + image.filename
             elif data_type == "masked":
                 filename = str(datetime.datetime.now().isoformat()
                                ) + '_masked' + '.jpg'
@@ -78,10 +101,10 @@ class ImageController:
                     if data_type == "url":
                         f.write(r.content)
                     elif data_type == "image":
-                        if image.name.split('.')[-1] == 'pdf':
+                        if image.filename.split('.')[-1] == 'pdf':
                             img_pdf.save(f)
                         else:
-                            f.write(image.body)
+                            f.write(image.file.read())
                     else:
                         imgdata = base64.b64decode(image)
                         f.write(imgdata)
